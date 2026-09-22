@@ -1,0 +1,13 @@
+po_number,vendor,po_total,currency,status
+PO-1001,Acme Supplies Ltd,5000.00,USD,open
+PO-1002,Globex Systems,12000.00,USD,open
+PO-1003,Initech LLC,2750.00,USD,open
+PO-1004,Umbrella Corp,8400.00,USD,closed
+PO-1005,Stark Industries,7800.00,USD,open
+PO-1006,Vandelay Imports,3200.00,USD,open
+PO-1007,Hooli,9100.00,USD,open
+PO-1008,Wayne Enterprises,4600.00,USD,open
+PO-1009,Cyberdyne Systems,5500.00,USD,open
+PO-1010,Soylent Corp,4100.00,USD,open
+PO-1011,Tyrell Corp,6300.00,USD,open
+PO-1012,Massive Dynamic,2900.00,USD,open
