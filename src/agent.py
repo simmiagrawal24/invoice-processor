@@ -19,7 +19,7 @@ from langgraph.graph import END, StateGraph
 from . import config, prompts
 from .agent_schemas import AgentState, JudgeOutput, RepairOutput, SummaryOutput
 from .extractor import extract_text
-from .models import get_chat_model, is_agent_configured
+from .models import get_chat_model, is_configured
 from .normalize import Invoice, parse_invoice
 from .pipeline import load_pos
 from .rules import _norm, decide, match_po
@@ -386,12 +386,14 @@ def build_graph(*, repair_model=None, judge_model=None, summary_model=None):
     return sg.compile()
 
 
-def _default_models():
-    """Real Gemini models with structured output, or Nones when unconfigured."""
-    if not is_agent_configured():
+def _default_models(provider=None, api_key=None, model_name=None):
+    """Real provider models with structured output, or Nones when unconfigured."""
+    provider = provider or config.LLM_PROVIDER
+    key = (api_key or "").strip() if api_key else ""
+    if not key and not is_configured(provider):
         return None, None, None
-    base = get_chat_model(temperature=0.0)
-    creative = get_chat_model(temperature=0.2)
+    base = get_chat_model(provider, temperature=0.0, api_key=key or None, model=model_name)
+    creative = get_chat_model(provider, temperature=0.2, api_key=key or None, model=model_name)
     return (
         base.with_structured_output(RepairOutput),
         base.with_structured_output(JudgeOutput),
@@ -400,13 +402,21 @@ def _default_models():
 
 
 def run_agent(
-    pdf_path: str, *, repair_model=None, judge_model=None, summary_model=None, use_llm: bool = True
+    pdf_path: str,
+    *,
+    repair_model=None,
+    judge_model=None,
+    summary_model=None,
+    use_llm: bool = True,
+    provider=None,
+    api_key=None,
+    model_name=None,
 ) -> dict:
     """Run the agent graph; returns a pipeline.run-compatible result dict."""
     from .store import save as save_run
 
     if use_llm and repair_model is None and judge_model is None and summary_model is None:
-        repair_model, judge_model, summary_model = _default_models()
+        repair_model, judge_model, summary_model = _default_models(provider, api_key, model_name)
     graph = build_graph(
         repair_model=repair_model, judge_model=judge_model, summary_model=summary_model
     )

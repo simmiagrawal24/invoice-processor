@@ -66,8 +66,8 @@ def test_session_models_build():
     """The exact UI path: blank -> {}, key -> 4 pre-wrapped models, never raises."""
     import app
 
-    assert app._session_models("  ") == {}
-    models = app._session_models("test-key")
+    assert app._session_models("gemini", "  ", "") == {}
+    models = app._session_models("gemini", "test-key", "")
     assert sorted(models) == ["judge_model", "model", "repair_model", "summary_model"]
 
 
@@ -79,7 +79,7 @@ def test_session_models_bad_key_falls_back(monkeypatch):
         raise TypeError("bad key format")
 
     monkeypatch.setattr(app, "get_chat_model", boom)
-    assert app._session_models("some-key") == {}
+    assert app._session_models("gemini", "some-key", "") == {}
 
 
 def test_summary_receives_po_value():
@@ -98,3 +98,31 @@ def test_summary_failure_is_none():
         raise TimeoutError("slow")
 
     assert summarize_decision(_inv(), "Approved", ["ok"], model=RunnableLambda(boom)) is None
+
+
+def test_unknown_provider_rejected():
+    from src.models import get_chat_model
+
+    with pytest.raises(RuntimeError, match="Unknown provider"):
+        get_chat_model("bedrock")
+
+
+def test_missing_key_raises():
+    from src import config
+    from src.models import get_chat_model
+
+    old = config.OPENAI_API_KEY
+    config.OPENAI_API_KEY = ""
+    try:
+        with pytest.raises(RuntimeError, match="No API key"):
+            get_chat_model("openai")
+    finally:
+        config.OPENAI_API_KEY = old
+
+
+def test_all_providers_construct_offline():
+    from src.models import get_chat_model
+
+    assert type(get_chat_model("openai", api_key="x")).__name__ == "ChatOpenAI"
+    assert type(get_chat_model("anthropic", api_key="x")).__name__ == "ChatAnthropic"
+    assert type(get_chat_model("gemini", api_key="x")).__name__ == "ChatGoogleGenerativeAI"

@@ -1,4 +1,4 @@
-"""Gemini assists for the deterministic path. No key -> silent no-op."""
+"""Provider assists for the deterministic path. No key -> silent no-op."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 
 from . import prompts
 from .agent_schemas import RepairOutput, SummaryOutput
-from .models import get_chat_model, is_agent_configured
+from .models import get_chat_model, is_configured
 from .normalize import Invoice
 
 logger = logging.getLogger(__name__)
@@ -14,14 +14,16 @@ logger = logging.getLogger(__name__)
 _REPAIRABLE = ("invoice_number", "po_ref", "vendor", "total", "tax")
 
 
-def _structured(model, schema):
-    """Accept a chat model (wrap it) or a pre-wrapped/fake runnable (use as-is)."""
-    if model is None:
-        if not is_agent_configured():
-            return None
-        model = get_chat_model(temperature=0.0)
-    wrap = getattr(model, "with_structured_output", None)
-    return wrap(schema) if callable(wrap) else model
+def _structured(model, schema, provider=None, api_key=None, model_name=None):
+    """Accept a chat model (wrap it) or build the configured provider one."""
+    if model is not None:
+        wrap = getattr(model, "with_structured_output", None)
+        return wrap(schema) if callable(wrap) else model
+    if not is_configured(provider):
+        return None
+    return get_chat_model(
+        provider, temperature=0.0, api_key=api_key, model=model_name
+    ).with_structured_output(schema)
 
 
 def _missing(inv: Invoice) -> list[str]:
@@ -39,10 +41,14 @@ def _coerce_number(value: object) -> float | None:
         return None
 
 
-def repair_fields(raw_text: str, inv: Invoice, *, model=None) -> tuple[Invoice, list[str]]:
-    """Fill regex-missed fields via Gemini. Regex values are never overwritten."""
+def repair_fields(
+    raw_text: str, inv: Invoice, *, model=None, provider=None, api_key=None, model_name=None
+) -> tuple[Invoice, list[str]]:
+    """Fill regex-missed fields via the configured provider. Regex values are never overwritten."""
     missing = _missing(inv)
-    structured = _structured(model, RepairOutput) if missing else None
+    structured = (
+        _structured(model, RepairOutput, provider, api_key, model_name) if missing else None
+    )
     if structured is None:
         return inv, []
     try:
@@ -59,7 +65,7 @@ def repair_fields(raw_text: str, inv: Invoice, *, model=None) -> tuple[Invoice, 
         )
         data = out.model_dump()
     except Exception as exc:  # noqa: BLE001 — repair is best-effort
-        logger.warning("gemini repair skipped: %s", type(exc).__name__)
+        logger.warning("repair skipped: %s", type(exc).__name__)
         return inv, []
     repaired: list[str] = []
     updates: dict[str, object] = {}
@@ -90,12 +96,20 @@ def repair_fields(raw_text: str, inv: Invoice, *, model=None) -> tuple[Invoice, 
 
 
 def summarize_decision(
-    inv: Invoice, status: str, reasons: list[str], *, model=None, po_total: float | None = None
+    inv: Invoice,
+    status: str,
+    reasons: list[str],
+    *,
+    model=None,
+    po_total: float | None = None,
+    provider=None,
+    api_key=None,
+    model_name=None,
 ) -> str | None:
     """Short reviewer note. None when unconfigured or on failure."""
-    if model is None and not is_agent_configured():
+    if model is None and not is_configured(provider):
         return None
-    base = model or get_chat_model(temperature=0.2)
+    base = model or get_chat_model(provider, temperature=0.2, api_key=api_key, model=model_name)
     wrap = getattr(base, "with_structured_output", None)
     structured = wrap(SummaryOutput) if callable(wrap) else base
     try:
@@ -119,5 +133,5 @@ def summarize_decision(
         text = out.note if hasattr(out, "note") else str(out)
         return text or None
     except Exception as exc:  # noqa: BLE001
-        logger.warning("gemini summary skipped: %s", type(exc).__name__)
+        logger.warning("summary skipped: %s", type(exc).__name__)
         return None

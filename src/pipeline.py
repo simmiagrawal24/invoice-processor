@@ -18,7 +18,9 @@ def load_pos(path: str | None = None) -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def run(pdf_path: str, *, use_llm: bool = True, model=None) -> dict:
+def run(
+    pdf_path: str, *, use_llm: bool = True, model=None, provider=None, api_key=None, model_name=None
+) -> dict:
     raw_text, method = extract_text(pdf_path)
     stages = [{"stage": "1 · Extract", "detail": f"{method}: {len(raw_text)} chars"}]
     if not raw_text:
@@ -34,7 +36,9 @@ def run(pdf_path: str, *, use_llm: bool = True, model=None) -> dict:
     inv = parse_invoice(raw_text, known_vendors=[p["vendor"] for p in load_pos()])
     repaired: list[str] = []
     if use_llm:
-        inv, repaired = repair_fields(raw_text, inv, model=model)
+        inv, repaired = repair_fields(
+            raw_text, inv, model=model, provider=provider, api_key=api_key, model_name=model_name
+        )
     stages.append(
         {
             "stage": "2 · Normalise",
@@ -59,7 +63,16 @@ def run(pdf_path: str, *, use_llm: bool = True, model=None) -> dict:
     stages.append({"stage": "4 · Rules", "detail": f"{d.status}: " + " | ".join(d.reasons)})
 
     ai_summary = (
-        summarize_decision(inv, d.status, d.reasons, model=model, po_total=d.po_total)
+        summarize_decision(
+            inv,
+            d.status,
+            d.reasons,
+            model=model,
+            po_total=d.po_total,
+            provider=provider,
+            api_key=api_key,
+            model_name=model_name,
+        )
         if use_llm
         else None
     )

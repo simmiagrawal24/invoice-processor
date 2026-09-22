@@ -1,4 +1,9 @@
-"""Model factory: Gemini via LangChain, tuned for structured invoice work."""
+"""Model factory: provider dropdown (Gemini / OpenAI / Anthropic) via LangChain.
+
+- Server keys come from env (.env); a per-session key + model ID from the UI
+  overrides them and is never stored.
+- Construction is offline-safe; failures raise RuntimeError with a plain message.
+"""
 
 from __future__ import annotations
 
@@ -10,16 +15,47 @@ from . import config
 
 logger = logging.getLogger(__name__)
 
-# Noisy-but-harmless SDK notices: this model ignores temperature, and the AFC
-# note is informational. Filtered narrowly so real warnings still surface.
+# Noisy-but-harmless SDK notices, filtered narrowly so real warnings surface.
 warnings.filterwarnings("ignore", message=".*fixed sampling defaults.*", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*automatic function calling.*", category=UserWarning)
+
+PROVIDERS = ("gemini", "openai", "anthropic")
 
 _cache_ready = False
 
 
+def default_model(provider: str) -> str:
+    return {
+        "gemini": config.GEMINI_MODEL,
+        "openai": config.OPENAI_MODEL,
+        "anthropic": config.ANTHROPIC_MODEL,
+    }[provider]
+
+
+def server_key(provider: str) -> str:
+    return {
+        "gemini": config.GEMINI_API_KEY,
+        "openai": config.OPENAI_API_KEY,
+        "anthropic": config.ANTHROPIC_API_KEY,
+    }[provider]
+
+
+def normalize_provider(name: str | None) -> str:
+    provider = (name or config.LLM_PROVIDER).strip().lower()
+    if provider not in PROVIDERS:
+        raise RuntimeError(f"Unknown provider {name!r} — choose one of {', '.join(PROVIDERS)}")
+    return provider
+
+
+def is_configured(provider: str | None = None) -> bool:
+    try:
+        return bool(server_key(normalize_provider(provider)))
+    except RuntimeError:
+        return False
+
+
 def is_agent_configured() -> bool:
-    return bool(config.GEMINI_API_KEY)
+    return is_configured("gemini")
 
 
 def _ensure_cache() -> None:
@@ -34,27 +70,46 @@ def _ensure_cache() -> None:
     _cache_ready = True
 
 
-def get_chat_model(*, temperature: float = 0.0, max_retries: int = 2, api_key: str | None = None):
-    """Build the Gemini chat model. An explicit api_key wins (per-session BYOK)."""
-    key = (api_key or "").strip() or config.GEMINI_API_KEY
+def get_chat_model(
+    provider: str | None = None,
+    *,
+    temperature: float = 0.0,
+    max_retries: int = 2,
+    api_key: str | None = None,
+    model: str | None = None,
+):
+    """Build a provider chat model. Explicit api_key/model win (per-session BYOK)."""
+    provider = normalize_provider(provider)
+    key = (api_key or "").strip() or server_key(provider)
     if not key:
-        raise RuntimeError("GEMINI_API_KEY (or GOOGLE_API_KEY) is not set")
+        raise RuntimeError(f"No API key for provider {provider!r}")
+    model_name = (model or "").strip() or default_model(provider)
     _ensure_cache()
 
-    from langchain_google_genai import ChatGoogleGenerativeAI
+    if provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
 
-    if api_key:
+        if not api_key:
+            # Our key wins: the SDK prefers GOOGLE_API_KEY when both are set, which
+            # caused auth against a stale system-wide key.
+            os.environ["GOOGLE_API_KEY"] = key
+            return ChatGoogleGenerativeAI(
+                model=model_name, temperature=temperature, max_retries=max_retries
+            )
         return ChatGoogleGenerativeAI(
-            model=config.GEMINI_MODEL,
+            model=model_name,
             temperature=temperature,
             max_retries=max_retries,
             google_api_key=key,
         )
-    # Our key wins: the SDK prefers GOOGLE_API_KEY when both are set, which
-    # caused auth against a stale system-wide key.
-    os.environ["GOOGLE_API_KEY"] = key
-    return ChatGoogleGenerativeAI(
-        model=config.GEMINI_MODEL,
-        temperature=temperature,
-        max_retries=max_retries,
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=model_name, temperature=temperature, max_retries=max_retries, openai_api_key=key
+        )
+    from langchain_anthropic import ChatAnthropic
+
+    return ChatAnthropic(
+        model=model_name, temperature=temperature, max_retries=max_retries, anthropic_api_key=key
     )

@@ -9,16 +9,16 @@ import streamlit as st
 
 from src.agent import run_agent
 from src.agent_schemas import JudgeOutput, RepairOutput, SummaryOutput
-from src.config import GEMINI_MODEL, TOLERANCE_ABS, TOLERANCE_PCT
-from src.models import get_chat_model, is_agent_configured
+from src.config import TOLERANCE_ABS, TOLERANCE_PCT
+from src.models import default_model, get_chat_model, is_configured
 from src.pipeline import load_pos, run
 from src.store import load
 
 STATUS_COLOR = {"Approved": "#16a34a", "Flagged for review": "#d97706", "Rejected": "#dc2626"}
 
 
-def _session_models(session_key: str) -> dict:
-    """Pre-wrapped Gemini models bound to a visitor's session key. Never stored.
+def _session_models(provider: str, session_key: str, model_id: str) -> dict:
+    """Pre-wrapped provider models bound to a visitor's session key. Never stored.
 
     Never raises: a bad key must degrade to the app default, not crash the page.
     """
@@ -26,8 +26,8 @@ def _session_models(session_key: str) -> dict:
     if not key:
         return {}
     try:
-        base = get_chat_model(temperature=0.0, api_key=key)
-        creative = get_chat_model(temperature=0.2, api_key=key)
+        base = get_chat_model(provider, temperature=0.0, api_key=key, model=model_id or None)
+        creative = get_chat_model(provider, temperature=0.2, api_key=key, model=model_id or None)
     except Exception as exc:  # noqa: BLE001 — fall back, explain in UI
         import streamlit as st
 
@@ -68,24 +68,32 @@ with st.sidebar:
         f"Tolerance: ±max(${TOLERANCE_ABS:,.0f}, {TOLERANCE_PCT:.0%}) · Split-PO aware · Duplicate-safe"
     )
     st.divider()
+    provider = st.selectbox("Model provider", ["gemini", "openai", "anthropic"], index=0)
     session_key = st.text_input(
-        "Your Gemini key (optional)",
+        f"Your {provider} key (optional)",
         type="password",
         help="Session-only: overrides the app key for your runs. Never stored — "
-        "get one free at aistudio.google.com.",
+        "paste a key from the provider's console.",
+    )
+    model_id = st.text_input(
+        "Model ID",
+        value=default_model(provider),
+        help="Defaults to the app's model. Any valid ID for the provider works.",
     )
     if session_key.strip():
-        st.caption("🤖 AI runs on **your** key this session.")
-    elif is_agent_configured():
-        st.markdown(f"**AI assists: ON** 🤖 `{GEMINI_MODEL}`")
-        st.caption("Runs on the app key. Paste your own key above to use yours instead.")
+        st.caption(
+            f"🤖 AI runs on **your** key ({provider} / `{model_id or 'default'}`) this session."
+        )
+    elif is_configured(provider):
+        st.markdown(f"**AI assists: ON** 🤖 `{provider}`")
+        st.caption("Runs on the app key. Set your own key above to use yours instead.")
     else:
         st.markdown("**AI assists: OFF** — paste a key above to enable")
         st.caption("Repair of missed fields + reviewer note. Core stays deterministic.")
     use_llm = st.checkbox("Use AI assists", value=True)
     mode = st.radio("Flow", ["Deterministic", "Agentic (LangGraph + Gemini)"], index=0)
-    if mode.startswith("Agentic") and not is_agent_configured():
-        st.caption("No `GEMINI_API_KEY` — agent runs with deterministic judge only.")
+    if mode.startswith("Agentic") and not (session_key.strip() or is_configured(provider)):
+        st.caption("No key for this provider — agent runs with deterministic judge only.")
     if st.button("Reset demo history"):
         from pathlib import Path
 
@@ -128,7 +136,9 @@ with tab_run:
             tmp.write(up.read())
             pdf_path = tmp.name
         agentic = mode.startswith("Agentic")
-        session_models = _session_models(session_key) if session_key.strip() else {}
+        session_models = (
+            _session_models(provider, session_key, model_id) if session_key.strip() else {}
+        )
         with st.status("Running pipeline…", expanded=True) as status:
             st.write("① Extracting text (pypdf → pdfplumber → OCR fallback)")
             st.write("② Normalising fields" + (" + AI repair" if use_llm else ""))
@@ -142,10 +152,25 @@ with tab_run:
                 st.write("⑥ AI reviewer note")
             out = None
             try:
+                session_key_clean = session_key.strip() or None
                 out = (
-                    run_agent(pdf_path, use_llm=use_llm, **session_models)
+                    run_agent(
+                        pdf_path,
+                        use_llm=use_llm,
+                        provider=provider,
+                        api_key=session_key_clean,
+                        model_name=model_id or None,
+                        **session_models,
+                    )
                     if agentic
-                    else run(pdf_path, use_llm=use_llm, model=session_models.get("model"))
+                    else run(
+                        pdf_path,
+                        use_llm=use_llm,
+                        model=session_models.get("model"),
+                        provider=provider,
+                        api_key=session_key_clean,
+                        model_name=model_id or None,
+                    )
                 )
                 status.update(label=f"Done — {out['status']}", state="complete")
             except Exception as exc:  # noqa: BLE001 — never show a redacted crash page
@@ -191,8 +216,8 @@ with tab_run:
             if out.get("ai_summary"):
                 st.subheader("🤖 AI reviewer note")
                 st.info(out["ai_summary"])
-            elif use_llm and not is_agent_configured():
-                st.caption("AI note skipped — no `GEMINI_API_KEY` set. Core decision unaffected.")
+            elif use_llm and not (session_key.strip() or is_configured(provider)):
+                st.caption("AI note skipped — no key for this provider. Core decision unaffected.")
         if out.get("judge"):
             j = out["judge"]
             st.subheader("⚖️ Judge audit")

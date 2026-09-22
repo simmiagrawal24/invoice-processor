@@ -54,12 +54,10 @@ uv sync --dev
 uv run streamlit run app.py        # Live Run + Dashboard tabs
 ```
 
-AI features need one key in `.env` (see `.env.example`):
-```
-GEMINI_API_KEY=...
-```
-Visitors can paste their own key in the sidebar (session-only, never stored) —
-otherwise runs use the app key, or go fully deterministic with no key at all.
+AI features: pick a provider in the sidebar (Gemini / OpenAI / Anthropic), type any
+model ID (defaults: `gemini-3.6-flash`, `gpt-4o-mini`, `claude-haiku-4-5`), paste a key.
+Server keys live in `.env` (see `.env.example`); a pasted key is session-only and
+never stored. No key anywhere → fully deterministic.
 
 ## How it's built
 
