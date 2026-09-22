@@ -29,7 +29,7 @@ def save(entry: dict) -> list[dict]:
     with _LOCK:
         hist = load()
         entry["run_id"] = f"RUN-{len(hist) + 1:03d}"
-        entry["timestamp"] = datetime.now().isoformat(timespec="seconds")
+        entry["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         hist.append(entry)
         STORE.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(STORE.parent), suffix=".tmp")
