@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 
 import pandas as pd
@@ -13,6 +14,8 @@ from src.config import TOLERANCE_ABS, TOLERANCE_PCT
 from src.models import default_model, get_chat_model, is_configured
 from src.pipeline import load_pos, run
 from src.store import load
+
+logger = logging.getLogger(__name__)
 
 STATUS_COLOR = {"Approved": "#16a34a", "Flagged for review": "#d97706", "Rejected": "#dc2626"}
 
@@ -175,6 +178,7 @@ with tab_run:
                 status.update(label=f"Done — {out['status']}", state="complete")
             except Exception as exc:  # noqa: BLE001 — never show a redacted crash page
                 status.update(label="Run failed", state="error")
+                logger.exception("run failed for %s", up.name)
                 st.error(
                     "This invoice couldn't be processed "
                     f"({type(exc).__name__}). Try another file — nothing was saved."
