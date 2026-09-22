@@ -71,6 +71,38 @@ def test_session_models_build():
     assert sorted(models) == ["judge_model", "model", "repair_model", "summary_model"]
 
 
+def test_agent_kwargs_drops_raw_model():
+    """Regression: app passes session dict into run_agent — raw chat model must be stripped."""
+    import app
+
+    d = {"model": object(), "repair_model": 1, "judge_model": 2, "summary_model": 3}
+    assert app._agent_kwargs(d) == {"repair_model": 1, "judge_model": 2, "summary_model": 3}
+
+
+def test_run_agent_accepts_app_session_shape():
+    """End-to-end with the exact kwarg shape the UI builds (minus raw model)."""
+    import pathlib
+
+    from langchain_core.runnables import RunnableLambda
+
+    from src.agent import run_agent
+    from src.agent_schemas import JudgeOutput, SummaryOutput
+
+    pathlib.Path("runs/history.json").unlink(missing_ok=True)
+    out = run_agent(
+        "test_invoices/INV-2026-001_happy.pdf",
+        use_llm=True,
+        provider="gemini",
+        api_key=None,
+        model_name=None,
+        repair_model=RunnableLambda(lambda m: RepairOutput()),
+        judge_model=RunnableLambda(lambda m: JudgeOutput(extraction_accuracy=1.0, rationale="ok")),
+        summary_model=RunnableLambda(lambda m: SummaryOutput(note="n")),
+    )
+    assert out["status"] == "Approved"
+    pathlib.Path("runs/history.json").unlink(missing_ok=True)
+
+
 def test_session_models_bad_key_falls_back(monkeypatch):
     """A key that breaks construction degrades to {} instead of crashing the page."""
     import app

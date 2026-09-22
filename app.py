@@ -44,6 +44,11 @@ def _session_models(provider: str, session_key: str, model_id: str) -> dict:
     }
 
 
+def _agent_kwargs(session_models: dict) -> dict:
+    """run_agent takes structured models only — the raw chat model is run()'s."""
+    return {k: v for k, v in session_models.items() if k != "model"}
+
+
 st.set_page_config(page_title="AP Workbench · Invoice → Decision", page_icon="🧾", layout="wide")
 
 st.markdown(
@@ -163,7 +168,7 @@ with tab_run:
                         provider=provider,
                         api_key=session_key_clean,
                         model_name=model_id or None,
-                        **session_models,
+                        **_agent_kwargs(session_models),
                     )
                     if agentic
                     else run(
