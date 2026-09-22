@@ -62,6 +62,26 @@ def test_summary_text():
     assert summarize_decision(_inv(), "Approved", ["ok"], model=fake) == "Billed $5k vs PO. Pay it."
 
 
+def test_session_models_build():
+    """The exact UI path: blank -> {}, key -> 4 pre-wrapped models, never raises."""
+    import app
+
+    assert app._session_models("  ") == {}
+    models = app._session_models("test-key")
+    assert sorted(models) == ["judge_model", "model", "repair_model", "summary_model"]
+
+
+def test_session_models_bad_key_falls_back(monkeypatch):
+    """A key that breaks construction degrades to {} instead of crashing the page."""
+    import app
+
+    def boom(**kwargs):
+        raise TypeError("bad key format")
+
+    monkeypatch.setattr(app, "get_chat_model", boom)
+    assert app._session_models("some-key") == {}
+
+
 def test_summary_receives_po_value():
     seen = {}
 

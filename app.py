@@ -18,12 +18,21 @@ STATUS_COLOR = {"Approved": "#16a34a", "Flagged for review": "#d97706", "Rejecte
 
 
 def _session_models(session_key: str) -> dict:
-    """Pre-wrapped Gemini models bound to a visitor's session key. Never stored."""
+    """Pre-wrapped Gemini models bound to a visitor's session key. Never stored.
+
+    Never raises: a bad key must degrade to the app default, not crash the page.
+    """
     key = (session_key or "").strip()
     if not key:
         return {}
-    base = get_chat_model(temperature=0.0, api_key=key)
-    creative = get_chat_model(temperature=0.2, api_key=key)
+    try:
+        base = get_chat_model(temperature=0.0, api_key=key)
+        creative = get_chat_model(temperature=0.2, api_key=key)
+    except Exception as exc:  # noqa: BLE001 — fall back, explain in UI
+        import streamlit as st
+
+        st.warning(f"That key didn't work ({type(exc).__name__}) — using the app default instead.")
+        return {}
     return {
         "model": base,
         "repair_model": base.with_structured_output(RepairOutput),
@@ -131,12 +140,22 @@ with tab_run:
                 st.write("⑤ AI reviewer note")
             if agentic:
                 st.write("⑥ AI reviewer note")
-            out = (
-                run_agent(pdf_path, use_llm=use_llm, **session_models)
-                if agentic
-                else run(pdf_path, use_llm=use_llm, model=session_models.get("model"))
-            )
-            status.update(label=f"Done — {out['status']}", state="complete")
+            out = None
+            try:
+                out = (
+                    run_agent(pdf_path, use_llm=use_llm, **session_models)
+                    if agentic
+                    else run(pdf_path, use_llm=use_llm, model=session_models.get("model"))
+                )
+                status.update(label=f"Done — {out['status']}", state="complete")
+            except Exception as exc:  # noqa: BLE001 — never show a redacted crash page
+                status.update(label="Run failed", state="error")
+                st.error(
+                    "This invoice couldn't be processed "
+                    f"({type(exc).__name__}). Try another file — nothing was saved."
+                )
+        if out is None:
+            st.stop()
         color = STATUS_COLOR.get(out["status"], "#334155")
         st.markdown(
             f"<div class='verdict' style='background:{color}'>{out['status']} · {out.get('invoice_number') or 'no invoice no.'} · ${out.get('total') if out.get('total') is not None else '—'}</div>",
