@@ -58,6 +58,8 @@ AI features need one key in `.env` (see `.env.example`):
 ```
 GEMINI_API_KEY=...
 ```
+Visitors can paste their own key in the sidebar (session-only, never stored) —
+otherwise runs use the app key, or go fully deterministic with no key at all.
 
 ## How it's built
 

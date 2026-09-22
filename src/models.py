@@ -34,17 +34,25 @@ def _ensure_cache() -> None:
     _cache_ready = True
 
 
-def get_chat_model(*, temperature: float = 0.0, max_retries: int = 2):
-    """Build the Gemini chat model. Raises RuntimeError without a key (fail fast)."""
-    if not is_agent_configured():
+def get_chat_model(*, temperature: float = 0.0, max_retries: int = 2, api_key: str | None = None):
+    """Build the Gemini chat model. An explicit api_key wins (per-session BYOK)."""
+    key = (api_key or "").strip() or config.GEMINI_API_KEY
+    if not key:
         raise RuntimeError("GEMINI_API_KEY (or GOOGLE_API_KEY) is not set")
-    # Our key wins: the SDK prefers GOOGLE_API_KEY when both are set, which
-    # caused auth against a stale system-wide key.
-    os.environ["GOOGLE_API_KEY"] = config.GEMINI_API_KEY
     _ensure_cache()
 
     from langchain_google_genai import ChatGoogleGenerativeAI
 
+    if api_key:
+        return ChatGoogleGenerativeAI(
+            model=config.GEMINI_MODEL,
+            temperature=temperature,
+            max_retries=max_retries,
+            google_api_key=key,
+        )
+    # Our key wins: the SDK prefers GOOGLE_API_KEY when both are set, which
+    # caused auth against a stale system-wide key.
+    os.environ["GOOGLE_API_KEY"] = key
     return ChatGoogleGenerativeAI(
         model=config.GEMINI_MODEL,
         temperature=temperature,

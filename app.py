@@ -8,12 +8,29 @@ import pandas as pd
 import streamlit as st
 
 from src.agent import run_agent
+from src.agent_schemas import JudgeOutput, RepairOutput, SummaryOutput
 from src.config import GEMINI_MODEL, TOLERANCE_ABS, TOLERANCE_PCT
-from src.models import is_agent_configured
+from src.models import get_chat_model, is_agent_configured
 from src.pipeline import load_pos, run
 from src.store import load
 
 STATUS_COLOR = {"Approved": "#16a34a", "Flagged for review": "#d97706", "Rejected": "#dc2626"}
+
+
+def _session_models(session_key: str) -> dict:
+    """Pre-wrapped Gemini models bound to a visitor's session key. Never stored."""
+    key = (session_key or "").strip()
+    if not key:
+        return {}
+    base = get_chat_model(temperature=0.0, api_key=key)
+    creative = get_chat_model(temperature=0.2, api_key=key)
+    return {
+        "model": base,
+        "repair_model": base.with_structured_output(RepairOutput),
+        "judge_model": base.with_structured_output(JudgeOutput),
+        "summary_model": creative.with_structured_output(SummaryOutput),
+    }
+
 
 st.set_page_config(page_title="AP Workbench · Invoice → Decision", page_icon="🧾", layout="wide")
 
@@ -42,10 +59,19 @@ with st.sidebar:
         f"Tolerance: ±max(${TOLERANCE_ABS:,.0f}, {TOLERANCE_PCT:.0%}) · Split-PO aware · Duplicate-safe"
     )
     st.divider()
-    if is_agent_configured():
+    session_key = st.text_input(
+        "Your Gemini key (optional)",
+        type="password",
+        help="Session-only: overrides the app key for your runs. Never stored — "
+        "get one free at aistudio.google.com.",
+    )
+    if session_key.strip():
+        st.caption("🤖 AI runs on **your** key this session.")
+    elif is_agent_configured():
         st.markdown(f"**AI assists: ON** 🤖 `{GEMINI_MODEL}`")
+        st.caption("Runs on the app key. Paste your own key above to use yours instead.")
     else:
-        st.markdown("**AI assists: OFF** — set `GEMINI_API_KEY` to enable")
+        st.markdown("**AI assists: OFF** — paste a key above to enable")
         st.caption("Repair of missed fields + reviewer note. Core stays deterministic.")
     use_llm = st.checkbox("Use AI assists", value=True)
     mode = st.radio("Flow", ["Deterministic", "Agentic (LangGraph + Gemini)"], index=0)
@@ -93,6 +119,7 @@ with tab_run:
             tmp.write(up.read())
             pdf_path = tmp.name
         agentic = mode.startswith("Agentic")
+        session_models = _session_models(session_key) if session_key.strip() else {}
         with st.status("Running pipeline…", expanded=True) as status:
             st.write("① Extracting text (pypdf → pdfplumber → OCR fallback)")
             st.write("② Normalising fields" + (" + AI repair" if use_llm else ""))
@@ -105,7 +132,9 @@ with tab_run:
             if agentic:
                 st.write("⑥ AI reviewer note")
             out = (
-                run_agent(pdf_path, use_llm=use_llm) if agentic else run(pdf_path, use_llm=use_llm)
+                run_agent(pdf_path, use_llm=use_llm, **session_models)
+                if agentic
+                else run(pdf_path, use_llm=use_llm, model=session_models.get("model"))
             )
             status.update(label=f"Done — {out['status']}", state="complete")
         color = STATUS_COLOR.get(out["status"], "#334155")
