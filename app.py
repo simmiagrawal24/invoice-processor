@@ -263,7 +263,7 @@ with tab_run:
         with st.expander("Raw extracted text"):
             st.text(out.get("raw_text", ""))
     else:
-        st.info("Upload a PDF from `test_invoices/` — start with `INV-2026-001_happy.pdf`.")
+        st.info("Drop an invoice PDF to begin — a decision appears here in seconds.")
 
 with tab_dash:
     if not hist:
